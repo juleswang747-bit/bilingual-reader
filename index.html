@@ -74,6 +74,7 @@ details{margin:12px 0}
 <body>
 <header>
   <button id="libBtn">☰ 资料库</button>
+  <button id="quickImp" title="导入双语文件，可多选">＋ 导入</button>
   <div id="title" class="title"></div>
   <select id="modeSel" title="阅读模式">
     <option value="side">并排对照</option>
@@ -100,6 +101,8 @@ details{margin:12px 0}
 
 <div id="lib" class="overlay"><div class="lib-in">
   <div class="lib-head"><h2>资料库</h2><button id="libClose">返回阅读</button></div>
+  <button id="quickImp2" class="primary" style="width:100%;margin:6px 0 4px;padding:14px">＋ 导入资料（.json 等，可一次多选）</button>
+  <p class="muted" style="margin:4px 0 0">点上面的按钮，在“文件”里点右上角「选择」，选中全部文件即可批量导入。</p>
   <div id="docList"></div>
 
   <h3 style="margin-top:28px">导入新资料</h3>
@@ -120,6 +123,7 @@ details{margin:12px 0}
     <summary>或者：导入双语文件（可一次选多个）</summary>
     <p class="muted">支持：① JSON，如 [{"zh":"…","en":"…"}]，也包括本阅读器“导出”的备份；② TSV，每行“中文⇥英文”；③ 中英文段落交替排列的 txt / docx（自动识别哪段是中文）。选了这里就不用填上面的两栏。可以一次多选，批量导入多份资料。</p>
     <input type="file" id="fBi" multiple accept=".json,.tsv,.txt,.md,.docx,application/json">
+    <input type="file" id="fQuick" multiple accept=".json,.tsv,.txt,.md,.docx,application/json" hidden>
   </details>
   <button id="impBtn" class="primary">导入并打开</button>
 
@@ -494,6 +498,25 @@ async function openDoc(d) {
   applyAnchor(a);
   requestAnimationFrame(() => applyAnchor(a));
 }
+async function importFiles(bfs) {
+  bfs = [...bfs].sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  let ok = 0, first = null; const fails = [];
+  for (const [k, f] of bfs.entries()) {
+    toast(`正在导入 ${k + 1} / ${bfs.length}：${f.name}`, 60000);
+    try {
+      const r = parseBilingual(await readFile(f), 'auto');
+      const d = normalize({id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: r.title || f.name.replace(/\.\w+$/, ''), zh: r.zh, en: r.en, created: Date.now()});
+      await Store.put(d); ok++; first = first || d;
+    } catch (er) { fails.push(f.name + '：' + er.message); }
+  }
+  if (first) await openDoc(first);
+  if (fails.length) alert(`已导入 ${ok} 份，${fails.length} 份失败：\n` + fails.join('\n'));
+  else toast(`已导入 ${ok} 份资料，点「☰ 资料库」切换`, 5000);
+}
+const pickQuick = () => { $('#fQuick').value = ''; $('#fQuick').click(); };
+$('#quickImp').onclick = pickQuick;
+$('#quickImp2').onclick = pickQuick;
+$('#fQuick').onchange = e => { if (e.target.files.length) importFiles(e.target.files); };
 $('#impBtn').onclick = async () => {
   try {
     const mode = $('#splitMode').value; let title = $('#impTitle').value.trim(), zh, en;
