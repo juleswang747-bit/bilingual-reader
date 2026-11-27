@@ -53,6 +53,8 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .toc-ch>summary span{flex:1}
 .toc-go{font-size:12px;color:var(--accent);flex:none}
 .toc-it{display:block;padding:10px 14px 10px 30px;border-top:1px solid var(--line);cursor:pointer;font-size:15px;line-height:1.45}
+.toc-en{display:block;font-size:12.5px;color:var(--muted);font-family:Georgia,"Times New Roman",serif;margin-top:1px}
+.toc-n{font-size:12px;color:var(--muted);font-weight:400;flex:none}
 .toc-it.l3{padding-left:46px;font-size:14px;color:var(--muted)}
 .toc-it:hover,.toc-it.cur{background:var(--hl)}
 .toc-ch.cur>summary{color:var(--accent)}
@@ -491,6 +493,11 @@ function tocOf(d) {
   });
   return t;
 }
+function tocLabel(t) {
+  const k = t.indexOf(' / ');
+  if (k < 0) return esc(t);
+  return `${esc(t.slice(0, k))}<small class="toc-en">${esc(t.slice(k + 3))}</small>`;
+}
 function renderToc() {
   const d = S.doc, q = $('#tocQ').value.trim().toLowerCase();
   const toc = tocOf(d), cur = S.last ? S.last.i : 0;
@@ -503,9 +510,9 @@ function renderToc() {
     if (q && !hit(g.h) && !its.length) return '';
     const isCur = curIdx >= g.k && (g.items.length ? curIdx <= g.items[g.items.length - 1].k : curIdx === g.k);
     const open = q || isCur ? ' open' : '';
-    const sub = its.map(o => `<a class="toc-it l${Math.min(o.x.l, 3)}${o.k === curIdx ? ' cur' : ''}" data-i="${o.x.i}">${esc(o.x.t)}</a>`).join('');
-    if (!g.items.length) return `<div class="toc-ch${isCur ? ' cur' : ''}"><a class="toc-it" style="border-top:0;padding-left:14px;font-weight:600" data-i="${g.h.i}">${esc(g.h.t)}</a></div>`;
-    return `<details class="toc-ch${isCur ? ' cur' : ''}"${open}><summary><span>${esc(g.h.t)}</span><a class="toc-go" data-i="${g.h.i}">跳到开头</a></summary>${sub}</details>`;
+    const sub = its.map(o => `<a class="toc-it l${Math.min(o.x.l, 3)}${o.k === curIdx ? ' cur' : ''}" data-i="${o.x.i}" data-f="${+o.x.f || 0}">${tocLabel(o.x.t)}</a>`).join('');
+    if (!g.items.length) return `<div class="toc-ch${isCur ? ' cur' : ''}"><a class="toc-it" style="border-top:0;padding-left:14px;font-weight:600" data-i="${g.h.i}">${tocLabel(g.h.t)}</a></div>`;
+    return `<details class="toc-ch${isCur ? ' cur' : ''}"${open}><summary><span>${tocLabel(g.h.t)}</span><span class="toc-n">${g.items.length}</span><a class="toc-go" data-i="${g.h.i}">跳到开头</a></summary>${sub}</details>`;
   }).join('');
 }
 function showToc() {
@@ -520,8 +527,8 @@ $('#tocQ').oninput = renderToc;
 $('#tocList').onclick = e => {
   const a = e.target.closest('[data-i]'); if (!a) return;
   e.preventDefault();
-  const i = +a.dataset.i; $('#toc').classList.remove('open');
-  S.active = null; const an = {i, f: 0}; applyAnchor(an); queueSave(an); setHL(i);
+  const i = +a.dataset.i, f = Math.max(0, Math.min(0.98, +a.dataset.f || 0)); $('#toc').classList.remove('open');
+  S.active = null; S.hl = -1; const an = {i, f}; applyAnchor(an); requestAnimationFrame(() => applyAnchor(an)); queueSave(an); setHL(i);
 };
 
 /* ---------- 资料库 ---------- */
