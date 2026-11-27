@@ -42,6 +42,20 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .h2{font-size:1.2em;font-weight:700;color:var(--accent)}
 .h3{font-weight:700}
 .seg.hl,.pair.hl{background:var(--hl)}
+.pid{display:inline-block;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:0 6px;margin-bottom:2px;font-family:-apple-system,system-ui,sans-serif;line-height:1.7}
+#toc .lib-in{max-width:720px}
+.toc-search{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-size:16px;margin:8px 0 6px}
+.toc-ch{margin:6px 0;border:1px solid var(--line);border-radius:10px;background:var(--card);overflow:hidden}
+.toc-ch>summary{list-style:none;padding:12px 14px;font-weight:600;cursor:pointer;display:flex;gap:8px;align-items:baseline}
+.toc-ch>summary::-webkit-details-marker{display:none}
+.toc-ch>summary::before{content:"▸";color:var(--muted);flex:none}
+.toc-ch[open]>summary::before{content:"▾"}
+.toc-ch>summary span{flex:1}
+.toc-go{font-size:12px;color:var(--accent);flex:none}
+.toc-it{display:block;padding:10px 14px 10px 30px;border-top:1px solid var(--line);cursor:pointer;font-size:15px;line-height:1.45}
+.toc-it.l3{padding-left:46px;font-size:14px;color:var(--muted)}
+.toc-it:hover,.toc-it.cur{background:var(--hl)}
+.toc-ch.cur>summary{color:var(--accent)}
 .peek{flex-basis:100%;margin:6px 0 2px 3.2em;padding:6px 10px;border-left:3px solid var(--accent);background:var(--card);border-radius:4px;font-size:.92em}
 body:not(.proof) .seg.empty{padding:0;min-height:1px}
 body:not(.proof) .seg.empty .num{display:none}
@@ -74,6 +88,7 @@ details{margin:12px 0}
 <body>
 <header>
   <button id="libBtn">☰ 资料库</button>
+  <button id="tocBtn" title="目录">☷ 目录</button>
   <button id="quickImp" title="导入双语文件，可多选">＋ 导入</button>
   <div id="title" class="title"></div>
   <select id="modeSel" title="阅读模式">
@@ -136,6 +151,11 @@ details{margin:12px 0}
     · 所有资料和阅读进度保存在本浏览器里，完全离线可用。换设备或清理浏览器数据前，请用「导出」备份。
   </div>
 </div></div>
+<div id="toc" class="overlay"><div class="lib-in">
+  <div class="lib-head"><h2 id="tocTitle">目录</h2><button id="tocClose">返回阅读</button></div>
+  <input id="tocQ" class="toc-search" type="search" placeholder="搜索章节 / Search sections">
+  <div id="tocList"></div>
+</div></div>
 <div id="toast"></div>
 
 <script>
@@ -191,7 +211,7 @@ function parseBilingual(t, mode) {
   t = t.replace(/^﻿/, ''); const s = t.trim();
   if (s[0] === '{' || s[0] === '[') {
     const j = JSON.parse(s);
-    if (!Array.isArray(j) && Array.isArray(j.zh)) return {title: j.title, zh: j.zh.map(String), en: (j.en || []).map(String)};
+    if (!Array.isArray(j) && Array.isArray(j.zh)) return {title: j.title, zh: j.zh.map(String), en: (j.en || []).map(String), toc: Array.isArray(j.toc) ? j.toc : null};
     const rows = Array.isArray(j) ? j : (j.segments || []); const zh = [], en = [];
     rows.forEach(r => {
       if (Array.isArray(r)) { zh.push(String(r[0] ?? '')); en.push(String(r[1] ?? '')); }
@@ -278,8 +298,11 @@ function normalize(d) {
 
 /* ---------- 渲染 ---------- */
 function fmt(t) {
+  let tag = '';
+  const k = t.match(/^〔([^〕\n]{1,30})〕\n?/);
+  if (k) { tag = `<span class="pid">${esc(k[1])}</span><br>`; t = t.slice(k[0].length); }
   const m = t.match(/^(#{1,3})\s+/);
-  return {cls: m ? 'h' + m[1].length : '', html: esc(m ? t.slice(m[0].length) : t).replace(/\n/g, '<br>')};
+  return {cls: m ? 'h' + m[1].length : '', html: tag + esc(m ? t.slice(m[0].length) : t).replace(/\n/g, '<br>')};
 }
 function segHTML(t, i, lang) {
   const f = fmt(t);
@@ -458,6 +481,49 @@ window.addEventListener('resize', () => { cancelAnimationFrame(rz); const a = S.
 let toastT = 0;
 function toast(msg, ms = 2500) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
 
+/* ---------- 目录 ---------- */
+function tocOf(d) {
+  if (d.toc && d.toc.length) return d.toc;
+  const t = [];
+  d.zh.forEach((z, i) => {
+    const m = (z.match(/^(#{1,3})\s+(.*)/) || (d.en[i] || '').match(/^(#{1,3})\s+(.*)/));
+    if (m) t.push({l: Math.min(m[1].length, 3), t: m[2].split('\n')[0], i});
+  });
+  return t;
+}
+function renderToc() {
+  const d = S.doc, q = $('#tocQ').value.trim().toLowerCase();
+  const toc = tocOf(d), cur = S.last ? S.last.i : 0;
+  if (!toc.length) { $('#tocList').innerHTML = '<p class="muted">这份资料没有目录信息。可以用底部进度条跳转，或用带目录的 .json 文件重新导入。</p>'; return; }
+  let curIdx = -1; toc.forEach((x, k) => { if (x.i <= cur) curIdx = k; });
+  const groups = []; toc.forEach((x, k) => { if (x.l <= 1 || !groups.length) groups.push({h: x, k, items: []}); else groups[groups.length - 1].items.push({x, k}); });
+  const hit = x => !q || x.t.toLowerCase().includes(q);
+  $('#tocList').innerHTML = groups.map(g => {
+    const its = g.items.filter(o => hit(o.x) || (q && hit(g.h)));
+    if (q && !hit(g.h) && !its.length) return '';
+    const isCur = curIdx >= g.k && (g.items.length ? curIdx <= g.items[g.items.length - 1].k : curIdx === g.k);
+    const open = q || isCur ? ' open' : '';
+    const sub = its.map(o => `<a class="toc-it l${Math.min(o.x.l, 3)}${o.k === curIdx ? ' cur' : ''}" data-i="${o.x.i}">${esc(o.x.t)}</a>`).join('');
+    if (!g.items.length) return `<div class="toc-ch${isCur ? ' cur' : ''}"><a class="toc-it" style="border-top:0;padding-left:14px;font-weight:600" data-i="${g.h.i}">${esc(g.h.t)}</a></div>`;
+    return `<details class="toc-ch${isCur ? ' cur' : ''}"${open}><summary><span>${esc(g.h.t)}</span><a class="toc-go" data-i="${g.h.i}">跳到开头</a></summary>${sub}</details>`;
+  }).join('');
+}
+function showToc() {
+  if (!S.doc) { showLib(); return; }
+  $('#tocTitle').textContent = '目录 · ' + S.doc.title; $('#tocQ').value = '';
+  renderToc(); $('#toc').classList.add('open');
+  const c = $('#tocList .toc-it.cur') || $('#tocList .toc-ch.cur'); if (c) c.scrollIntoView({block: 'center'});
+}
+$('#tocBtn').onclick = showToc;
+$('#tocClose').onclick = () => $('#toc').classList.remove('open');
+$('#tocQ').oninput = renderToc;
+$('#tocList').onclick = e => {
+  const a = e.target.closest('[data-i]'); if (!a) return;
+  e.preventDefault();
+  const i = +a.dataset.i; $('#toc').classList.remove('open');
+  S.active = null; const an = {i, f: 0}; applyAnchor(an); queueSave(an); setHL(i);
+};
+
 /* ---------- 资料库 ---------- */
 function progressOf(d) {
   try { const p = JSON.parse(lsGet('br-pos-' + d.id, 'null')); return p ? Math.round((p.i + 1) / d.zh.length * 100) : 0; } catch (e) { return 0; }
@@ -466,8 +532,8 @@ async function showLib() {
   const docs = (await Store.all()).sort((a, b) => (b.opened || 0) - (a.opened || 0));
   $('#docList').innerHTML = docs.length ? docs.map(d => `<div class="doc" data-id="${esc(d.id)}">
       <div class="dt">${esc(d.title)}</div>
-      <button data-a="open">阅读</button><button data-a="export">导出</button><button data-a="del">删除</button>
-      <div class="dm">${d.zh.length} 组段落 · 已读 ${progressOf(d)}%</div></div>`).join('')
+      <button data-a="open">阅读</button><button data-a="toc">目录</button><button data-a="export">导出</button><button data-a="del">删除</button>
+      <div class="dm">${d.zh.length} 组段落${d.toc && d.toc.length ? ' · 目录 ' + d.toc.length + ' 条' : ''} · 已读 ${progressOf(d)}%</div></div>`).join('')
     : '<p class="muted">还没有资料，在下方导入。</p>';
   $('#libClose').hidden = !S.doc;
   $('#lib').classList.add('open');
@@ -478,8 +544,9 @@ $('#docList').onclick = async e => {
   const b = e.target.closest('button[data-a]'); if (!b) return;
   const id = b.closest('.doc').dataset.id, d = (await Store.all()).find(x => x.id === id); if (!d) return;
   if (b.dataset.a === 'open') openDoc(d);
+  else if (b.dataset.a === 'toc') { await openDoc(d); showToc(); }
   else if (b.dataset.a === 'export') {
-    const blob = new Blob([JSON.stringify({format: 'bilingual-reader-v1', title: d.title, zh: d.zh, en: d.en}, null, 1)], {type: 'application/json'});
+    const blob = new Blob([JSON.stringify({format: 'bilingual-reader-v1', title: d.title, zh: d.zh, en: d.en, toc: d.toc || undefined}, null, 1)], {type: 'application/json'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = d.title.replace(/[\\/:*?"<>|]/g, '_') + '.json';
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   } else if (b.dataset.a === 'del') {
@@ -498,6 +565,10 @@ async function openDoc(d) {
   applyAnchor(a);
   requestAnimationFrame(() => applyAnchor(a));
 }
+async function makeDoc(title, r) {
+  const old = (await Store.all()).find(x => x.title === title);
+  return normalize({id: old ? old.id : Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title, zh: r.zh, en: r.en, toc: r.toc || null, created: old ? old.created : Date.now()});
+}
 async function importFiles(bfs) {
   bfs = [...bfs].sort((a, b) => a.name.localeCompare(b.name, 'zh'));
   let ok = 0, first = null; const fails = [];
@@ -505,7 +576,7 @@ async function importFiles(bfs) {
     toast(`正在导入 ${k + 1} / ${bfs.length}：${f.name}`, 60000);
     try {
       const r = parseBilingual(await readFile(f), 'auto');
-      const d = normalize({id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: r.title || f.name.replace(/\.\w+$/, ''), zh: r.zh, en: r.en, created: Date.now()});
+      const d = await makeDoc(r.title || f.name.replace(/\.\w+$/, ''), r);
       await Store.put(d); ok++; first = first || d;
     } catch (er) { fails.push(f.name + '：' + er.message); }
   }
@@ -528,7 +599,7 @@ $('#impBtn').onclick = async () => {
         toast(`正在导入 ${k + 1} / ${bfs.length}：${f.name}`, 60000);
         try {
           const r = parseBilingual(await readFile(f), mode);
-          const d = normalize({id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: r.title || f.name.replace(/\.\w+$/, ''), zh: r.zh, en: r.en, created: Date.now()});
+          const d = await makeDoc(r.title || f.name.replace(/\.\w+$/, ''), r);
           await Store.put(d); ok++; first = first || d;
         } catch (er) { fails.push(f.name + '：' + er.message); }
       }
@@ -541,7 +612,7 @@ $('#impBtn').onclick = async () => {
     const bf = bfs[0];
     if (bf) {
       const r = parseBilingual(await readFile(bf), mode);
-      zh = r.zh; en = r.en; title = title || r.title || bf.name.replace(/\.\w+$/, '');
+      zh = r.zh; en = r.en; var toc = r.toc; title = title || r.title || bf.name.replace(/\.\w+$/, '');
     } else {
       const fz = $('#fZh').files[0], fe = $('#fEn').files[0];
       const zt = (await readFile(fz)) || $('#tZh').value, et = (await readFile(fe)) || $('#tEn').value;
@@ -550,7 +621,7 @@ $('#impBtn').onclick = async () => {
       title = title || (fz ? fz.name.replace(/\.\w+$/, '') : '') || '未命名资料';
     }
     const diff = zh.length !== en.length, nz = zh.length, ne = en.length;
-    const d = normalize({id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title, zh, en, created: Date.now()});
+    const d = await makeDoc(title, {zh, en, toc: typeof toc !== 'undefined' ? toc : null});
     await Store.put(d);
     ['#impTitle', '#tZh', '#tEn', '#fZh', '#fEn', '#fBi'].forEach(s => { $(s).value = ''; });
     await openDoc(d);
